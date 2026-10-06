@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -21,6 +21,14 @@ if (process.platform === 'win32') {
 let tray, overlay;
 let overlayReady = false;
 let spawnQueued = false;
+let paused = false;
+let automationEnabled = false;
+let macroInFlight = false;
+let lastMacroTime = 0;
+const macroCooldownMs = 700;
+const manualShortcut = 'CommandOrControl+Shift+W';
+const pauseShortcut = 'CommandOrControl+Shift+P';
+const dropShortcut = 'CommandOrControl+Shift+D';
 
 const VK_CONTROL = 0x11;
 const VK_RETURN  = 0x0D;
@@ -145,6 +153,7 @@ function createOverlay() {
     if (spawnQueued && overlay && overlay.isVisible()) {
       spawnQueued = false;
       overlay.webContents.send('spawn-whip');
+      sendOverlayStatus();
       refocusPreviousApp();
     }
   });
@@ -157,28 +166,84 @@ function createOverlay() {
 
 function toggleOverlay() {
   if (overlay && overlay.isVisible()) {
-    overlay.webContents.send('drop-whip');
+    dropOverlay();
     return;
   }
   if (!overlay) createOverlay();
   overlay.show();
+  paused = false;
   if (overlayReady) {
     overlay.webContents.send('spawn-whip');
+    sendOverlayStatus();
     refocusPreviousApp();
   } else {
     spawnQueued = true;
   }
 }
 
-// ── IPC ─────────────────────────────────────────────────────────────────────
-ipcMain.on('whip-crack', () => {
+function sendOverlayStatus() {
+  if (!overlay || !overlayReady) return;
+  overlay.webContents.send('status', {
+    active: Boolean(overlay.isVisible()),
+    paused,
+    automationEnabled,
+  });
+}
+
+function dropOverlay() {
+  if (!overlay || !overlay.isVisible()) return;
+  paused = false;
+  overlay.webContents.send('pause-whip', false);
+  overlay.webContents.send('drop-whip');
+  sendOverlayStatus();
+  rebuildTrayMenu();
+}
+
+function togglePaused() {
+  if (!overlay || !overlay.isVisible()) return;
+  paused = !paused;
+  overlay.webContents.send('pause-whip', paused);
+  sendOverlayStatus();
+  rebuildTrayMenu();
+}
+
+function requestMacro(source = 'manual') {
+  if (source === 'auto' && !automationEnabled) return;
+  if (!overlay || !overlay.isVisible() || paused || macroInFlight) return;
+  const now = Date.now();
+  if (now - lastMacroTime < macroCooldownMs) return;
+
+  macroInFlight = true;
+  lastMacroTime = now;
   try {
     sendMacro();
   } catch (err) {
     console.warn('sendMacro failed:', err?.message || err);
   }
+  setTimeout(() => { macroInFlight = false; }, macroCooldownMs);
+}
+
+function rebuildTrayMenu() {
+  if (!tray) return;
+  const visible = Boolean(overlay?.isVisible());
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Manual crack (Ctrl/Cmd+Shift+W)', enabled: visible && !paused, click: () => requestMacro() },
+    { label: paused ? 'Resume physics (Ctrl/Cmd+Shift+P)' : 'Pause physics (Ctrl/Cmd+Shift+P)', enabled: visible, click: togglePaused },
+    { label: 'Drop whip (Ctrl/Cmd+Shift+D)', enabled: visible, click: dropOverlay },
+    { type: 'separator' },
+    { label: `Automatic cracking: ${automationEnabled ? 'On' : 'Off'}`, click: () => { automationEnabled = !automationEnabled; rebuildTrayMenu(); sendOverlayStatus(); } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+  ]));
+}
+
+// ── IPC ─────────────────────────────────────────────────────────────────────
+ipcMain.on('whip-crack', () => requestMacro('auto'));
+ipcMain.on('hide-overlay', () => {
+  if (overlay) overlay.hide();
+  paused = false;
+  rebuildTrayMenu();
 });
-ipcMain.on('hide-overlay', () => { if (overlay) overlay.hide(); });
 
 // ── Macro: immediate Ctrl+C, type "Go FASER", Enter ───────────────────────
 function sendMacro() {
@@ -279,12 +344,19 @@ function sendMacroLinux(text) {
 app.whenReady().then(async () => {
   tray = new Tray(await getTrayIcon());
   tray.setToolTip('OpenWhip - click for whip');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Quit', click: () => app.quit() },
-    ])
-  );
+  rebuildTrayMenu();
   tray.on('click', toggleOverlay);
+
+  for (const [shortcut, action] of [
+    [manualShortcut, () => requestMacro()],
+    [pauseShortcut, togglePaused],
+    [dropShortcut, dropOverlay],
+  ]) {
+    if (!globalShortcut.register(shortcut, action)) {
+      console.warn(`Could not register shortcut: ${shortcut}`);
+    }
+  }
 });
 
 app.on('window-all-closed', e => e.preventDefault()); // keep alive in tray
+app.on('will-quit', () => globalShortcut.unregisterAll());

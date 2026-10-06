@@ -59,9 +59,20 @@ Wayland applications.
 ## Controls
 
 - Click tray icon: spawn whip.
-- Click: drop whip.
-- Whip him 😩💢
-- It sends an interrupt (Ctrl-C) and one of 5 encouraging messages!
+- Click tray icon again: drop whip.
+- `Ctrl/Cmd+Shift+W`: manually crack and send the interrupt/message macro.
+- `Ctrl/Cmd+Shift+P`: pause or resume physics.
+- `Ctrl/Cmd+Shift+D`: drop the whip.
+- The default is **manual mode**. A fast whip only plays the crack sound; it does
+  not send keystrokes unless you use the manual crack shortcut.
+- Use the tray menu to enable **Automatic cracking** if you want tip speed to
+  trigger the macro. Automatic sends are rate-limited to prevent repeated
+  interrupts from one motion.
+
+The macro targets whichever application was focused before the overlay appeared.
+It sends `Ctrl-C`, types an encouraging message, and presses Enter. On macOS,
+grant Accessibility permission to the terminal/Electron app. On Linux, the
+target must be an X11/XWayland window and `xdotool` must be installed.
 
 ## Roadmap
 

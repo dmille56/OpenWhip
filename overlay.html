@@ -5,10 +5,26 @@
   * { margin: 0; padding: 0; cursor: none; }
   html, body { overflow: hidden; background: transparent; width: 100%; height: 100%; }
   canvas { display: block; }
+  #status {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: rgba(17, 17, 17, 0.78);
+    color: #fff;
+    font: 12px system-ui, sans-serif;
+    letter-spacing: .02em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+  }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="status"></div>
 <script>
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -84,6 +100,8 @@ let lastCrackTime = 0;
 let whipSpawnTime = 0;
 let handleAngle = P.baseTargetAngle;
 let handleAngVel = 0;
+let paused = false;
+const status = document.getElementById('status');
 
 const WHIP_CRACK_SOUNDS = ['sounds/A.mp3', 'sounds/B.mp3', 'sounds/C.mp3', 'sounds/D.mp3', 'sounds/E.mp3'];
 
@@ -296,7 +314,7 @@ function applyWallCollisions() {
 
 // ── Physics step ────────────────────────────────────────────────────────────
 function update() {
-  if (!whip) return;
+  if (!whip || paused) return;
 
   const g = dropping ? P.dropGravity : P.gravity;
   updateHandleAim();
@@ -447,6 +465,24 @@ window.bridge.onSpawnWhip(() => {
 
 window.bridge.onDropWhip(() => {
   if (whip && !dropping) dropping = true;
+});
+
+window.bridge.onPauseWhip(nextPaused => {
+  paused = nextPaused;
+});
+
+window.bridge.onStatus(nextStatus => {
+  paused = nextStatus.paused;
+  if (!nextStatus.active) {
+    status.style.opacity = '0';
+    return;
+  }
+  status.textContent = paused
+    ? 'Paused  |  Ctrl/Cmd+Shift+P to resume'
+    : nextStatus.automationEnabled
+      ? 'Automatic mode  |  Ctrl/Cmd+Shift+W to crack'
+      : 'Manual mode  |  Ctrl/Cmd+Shift+W to crack';
+  status.style.opacity = '1';
 });
 
 </script>
